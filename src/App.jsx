@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useLayoutEffect } from 'react'
 import { gsap } from 'gsap'
+import Squares from './components/Squares'
 import './App.css'
 
 // Coding quotes for inspiration
@@ -16,14 +17,48 @@ const quotes = [
   { text: "Debugging is twice as hard as writing the code in the first place.", author: "Brian Kernighan" },
 ]
 
+// Create notification sound using Web Audio API
+const createNotificationSound = () => {
+  const audioContext = new (window.AudioContext || window.webkitAudioContext)()
+
+  const playTone = (frequency, startTime, duration, type = 'sine') => {
+    const oscillator = audioContext.createOscillator()
+    const gainNode = audioContext.createGain()
+
+    oscillator.connect(gainNode)
+    gainNode.connect(audioContext.destination)
+
+    oscillator.frequency.value = frequency
+    oscillator.type = type
+
+    gainNode.gain.setValueAtTime(0.3, startTime)
+    gainNode.gain.exponentialRampToValueAtTime(0.01, startTime + duration)
+
+    oscillator.start(startTime)
+    oscillator.stop(startTime + duration)
+  }
+
+  const now = audioContext.currentTime
+  // Pleasant chime melody
+  playTone(523.25, now, 0.15) // C5
+  playTone(659.25, now + 0.15, 0.15) // E5
+  playTone(783.99, now + 0.3, 0.15) // G5
+  playTone(1046.50, now + 0.45, 0.3) // C6
+
+  return audioContext
+}
+
 function App() {
   // Timer states
   const [time, setTime] = useState(new Date())
   const [breakTime, setBreakTime] = useState(0)
   const [isBreakActive, setIsBreakActive] = useState(false)
   const [breakDuration, setBreakDuration] = useState(5)
+  const [customDuration, setCustomDuration] = useState('')
   const [linkedTaskId, setLinkedTaskId] = useState(null)
-  
+  const [showNotification, setShowNotification] = useState(false)
+  const [completedTaskName, setCompletedTaskName] = useState('')
+
   // Todo states
   const [todos, setTodos] = useState(() => {
     const saved = localStorage.getItem('devbreak-todos')
@@ -34,10 +69,10 @@ function App() {
   const [filter, setFilter] = useState('all')
   const [editingId, setEditingId] = useState(null)
   const [editText, setEditText] = useState('')
-  
+
   // Quote state
   const [currentQuote, setCurrentQuote] = useState(quotes[0])
-  
+
   // Refs for GSAP animations
   const appRef = useRef(null)
   const clockRef = useRef(null)
@@ -46,7 +81,7 @@ function App() {
   const todoCardRef = useRef(null)
   const headerRef = useRef(null)
   const breakIntervalRef = useRef(null)
-  const audioRef = useRef(null)
+  const notificationRef = useRef(null)
 
   // GSAP Entrance Animations
   useLayoutEffect(() => {
@@ -57,13 +92,13 @@ function App() {
         y: 50
       })
       gsap.set(headerRef.current, { opacity: 0, y: -30 })
-      gsap.set('.bg-orb', { scale: 0, opacity: 0 })
+      gsap.set('.squares-background', { opacity: 0 })
 
       // Timeline for entrance animations
       const tl = gsap.timeline({ defaults: { ease: 'power3.out' } })
 
       tl.to(headerRef.current, { opacity: 1, y: 0, duration: 0.8 })
-        .to('.bg-orb', { scale: 1, opacity: 0.25, duration: 1.5, stagger: 0.2 }, '-=0.5')
+        .to('.squares-background', { opacity: 0.4, duration: 2 }, '-=0.5')
         .to(clockRef.current, { opacity: 1, y: 0, duration: 0.8 }, '-=1')
         .to(breakCardRef.current, { opacity: 1, y: 0, duration: 0.8 }, '-=0.6')
         .to(quoteRef.current, { opacity: 1, y: 0, duration: 0.8 }, '-=0.6')
@@ -78,7 +113,7 @@ function App() {
   useEffect(() => {
     const digits = document.querySelectorAll('.time-value')
     digits.forEach(digit => {
-      gsap.fromTo(digit, 
+      gsap.fromTo(digit,
         { scale: 1.1, opacity: 0.7 },
         { scale: 1, opacity: 1, duration: 0.3, ease: 'back.out(2)' }
       )
@@ -125,14 +160,38 @@ function App() {
         setBreakTime(prev => {
           if (prev <= 1) {
             setIsBreakActive(false)
-            // Complete the linked task if exists
+            // Get task name before completing
+            let taskName = ''
             if (linkedTaskId) {
-              setTodos(prevTodos => prevTodos.map(todo => 
+              const task = todos.find(t => t.id === linkedTaskId)
+              taskName = task ? task.text : ''
+              setTodos(prevTodos => prevTodos.map(todo =>
                 todo.id === linkedTaskId ? { ...todo, completed: true } : todo
               ))
               setLinkedTaskId(null)
             }
-            if (audioRef.current) audioRef.current.play().catch(() => {})
+
+            // Play notification sound
+            try {
+              createNotificationSound()
+            } catch (e) {
+              console.log('Audio not supported')
+            }
+
+            // Show notification popup
+            setCompletedTaskName(taskName)
+            setShowNotification(true)
+
+            // Animate notification entrance
+            setTimeout(() => {
+              if (notificationRef.current) {
+                gsap.fromTo(notificationRef.current,
+                  { scale: 0.5, opacity: 0, y: 50 },
+                  { scale: 1, opacity: 1, y: 0, duration: 0.5, ease: 'back.out(2)' }
+                )
+              }
+            }, 10)
+
             // Celebration animation
             gsap.to(breakCardRef.current, {
               scale: 1.05,
@@ -152,14 +211,14 @@ function App() {
     return () => {
       if (breakIntervalRef.current) clearInterval(breakIntervalRef.current)
     }
-  }, [isBreakActive, linkedTaskId])
+  }, [isBreakActive, linkedTaskId, todos])
 
   const startBreak = (taskId = null) => {
     setBreakTime(breakDuration * 60)
     setIsBreakActive(true)
     setLinkedTaskId(taskId)
     // Animation on start
-    gsap.fromTo(breakCardRef.current, 
+    gsap.fromTo(breakCardRef.current,
       { scale: 0.95 },
       { scale: 1, duration: 0.5, ease: 'elastic.out(1, 0.5)' }
     )
@@ -169,6 +228,29 @@ function App() {
     setIsBreakActive(false)
     setBreakTime(0)
     setLinkedTaskId(null)
+  }
+
+  const handleCustomDuration = (e) => {
+    e.preventDefault()
+    const mins = parseInt(customDuration)
+    if (mins > 0 && mins <= 120) {
+      setBreakDuration(mins)
+      setCustomDuration('')
+    }
+  }
+
+  const closeNotification = () => {
+    if (notificationRef.current) {
+      gsap.to(notificationRef.current, {
+        scale: 0.5,
+        opacity: 0,
+        y: 50,
+        duration: 0.3,
+        onComplete: () => setShowNotification(false)
+      })
+    } else {
+      setShowNotification(false)
+    }
   }
 
   const formatBreakTime = (seconds) => {
@@ -181,7 +263,7 @@ function App() {
   const addTodo = (e) => {
     e.preventDefault()
     if (!newTodo.trim()) return
-    
+
     const todo = {
       id: Date.now(),
       text: newTodo.trim(),
@@ -190,10 +272,10 @@ function App() {
       createdAt: new Date().toISOString(),
       timeSpent: 0,
     }
-    
+
     setTodos(prev => [todo, ...prev])
     setNewTodo('')
-    
+
     // Animate new todo
     setTimeout(() => {
       const newItem = document.querySelector('.todo-item:first-child')
@@ -207,7 +289,7 @@ function App() {
   }
 
   const toggleTodo = (id) => {
-    setTodos(prev => prev.map(todo => 
+    setTodos(prev => prev.map(todo =>
       todo.id === id ? { ...todo, completed: !todo.completed } : todo
     ))
     // Animate checkbox
@@ -241,7 +323,7 @@ function App() {
 
   const saveEdit = (id) => {
     if (!editText.trim()) return
-    setTodos(prev => prev.map(todo => 
+    setTodos(prev => prev.map(todo =>
       todo.id === id ? { ...todo, text: editText.trim() } : todo
     ))
     setEditingId(null)
@@ -286,15 +368,15 @@ function App() {
   const minutes = time.getMinutes().toString().padStart(2, '0')
   const seconds = time.getSeconds().toString().padStart(2, '0')
   const ampm = hours24 >= 12 ? 'PM' : 'AM'
-  const dateStr = time.toLocaleDateString('en-US', { 
-    weekday: 'long', 
-    year: 'numeric', 
-    month: 'long', 
-    day: 'numeric' 
+  const dateStr = time.toLocaleDateString('en-US', {
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
   })
 
   const getPriorityColor = (priority) => {
-    switch(priority) {
+    switch (priority) {
       case 'high': return '#ef4444'
       case 'medium': return '#f59e0b'
       case 'low': return '#22c55e'
@@ -310,14 +392,17 @@ function App() {
 
   return (
     <div className="app-container" ref={appRef}>
-      {/* Background orbs */}
-      <div className="bg-orb bg-orb-1"></div>
-      <div className="bg-orb bg-orb-2"></div>
-      <div className="bg-orb bg-orb-3"></div>
-      
-      {/* Audio for notification */}
-      <audio ref={audioRef} src="data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2teleAgAKKPQ9buTKAAAJJrP+cqkMgAAG4zC+d65PgAAEn624/rXxUMAAAlprPX73NBJAAAB3+X//uHVTAAA+tnj//7j1k4AAPbb5f/+5NZPAAD02eX//uTWTwAA9Nnl//7k1k8AAPTa5v/+5NZPAAD22+f//uXXUAAA9tvo//7m2FEAAffb6f/+59lSAAH43Ov//unbUwAC+d7t///q3FQAAvre8P//7N5WAAn84fL//+7gWAAC/OL1///w4lkAA/3k9///8eNaAAT+5vj///LlXAAF/uj6///z5l0ABv/p+///9OdfAAf/6/3///XoYAAI/+z+///26WEACf/u/////uplAAr/7////+trZgAL//D///7sbGcADP/x///+7W1oAA3/8v///+5uaQAN//T///7ub2kADv/1///+73BqAA7/9f///vBwagAO//X///7wcGoADv/1///+8HBqAA7/9f///vBwagAN//X///7wcGoADf/0///+8HBqAA3/9P///vBwagAM//P///7vb2kAC//z///+725pAAv/8v///u5uaAAK//H///7tbGcACf/w///+7GtmAAj/7v///+tqZQAH/+z+///q6GQAB//r/f//6edjAAb/6fv//+jmYgAF/+j6///n5WEABP/m+P//5uRgAAP/5Pb//+XjXwAC/+L0///k4l4AAfzg8v//4+FdAAD83/D//+LgWwAA+t3u///h3loAAPnb7P//4NxZAAD42ur//9/bVwAA99no///e2lYAAPbY5v//3dlVAAD12OX//9zYVAAA9Nfk///b11MAAPPl////2tdRAAA=" />
-      
+      {/* Animated Squares Background */}
+      <div className="squares-background">
+        <Squares
+          direction="diagonal"
+          speed={0.5}
+          borderColor="rgba(99, 102, 241, 0.15)"
+          squareSize={50}
+          hoverFillColor="rgba(99, 102, 241, 0.1)"
+        />
+      </div>
+
       {/* Header */}
       <header className="header" ref={headerRef}>
         <div className="header-content">
@@ -350,7 +435,7 @@ function App() {
       {/* Main Content */}
       <main className="main-content">
         <div className="content-grid">
-          
+
           {/* Left Column - Clock & Break Timer */}
           <div className="left-column">
             {/* Main Clock */}
@@ -394,7 +479,7 @@ function App() {
                 </div>
                 {isBreakActive && <span className="active-badge">● Active</span>}
               </div>
-              
+
               {!isBreakActive ? (
                 <div className="break-controls">
                   <div className="duration-section">
@@ -410,10 +495,25 @@ function App() {
                         </button>
                       ))}
                     </div>
+                    <form onSubmit={handleCustomDuration} className="custom-duration-form">
+                      <input
+                        type="number"
+                        min="1"
+                        max="120"
+                        placeholder="Custom min"
+                        value={customDuration}
+                        onChange={(e) => setCustomDuration(e.target.value)}
+                        className="custom-duration-input"
+                      />
+                      <button type="submit" className="custom-duration-btn">Set</button>
+                    </form>
+                    {breakDuration !== 5 && breakDuration !== 10 && breakDuration !== 15 && breakDuration !== 20 && breakDuration !== 30 && (
+                      <p className="custom-duration-label">Custom: {breakDuration} minutes</p>
+                    )}
                   </div>
                   <button onClick={() => startBreak()} className="btn-primary start-btn">
                     <span className="btn-icon">☕</span>
-                    Start Break
+                    Start {breakDuration}min Break
                   </button>
                   {activeCount > 0 && (
                     <div className="link-task-section">
@@ -439,10 +539,10 @@ function App() {
                     <div className="break-progress-ring">
                       <svg className="progress-svg" viewBox="0 0 120 120">
                         <circle className="progress-bg" cx="60" cy="60" r="54" />
-                        <circle 
-                          className="progress-bar" 
-                          cx="60" 
-                          cy="60" 
+                        <circle
+                          className="progress-bar"
+                          cx="60"
+                          cy="60"
                           r="54"
                           style={{
                             strokeDasharray: 339.292,
@@ -558,14 +658,14 @@ function App() {
                     {filter === 'completed' ? '🎉' : '📝'}
                   </span>
                   <p className="empty-text">
-                    {filter === 'all' ? 'No tasks yet. Add one above!' : 
-                     filter === 'active' ? 'All tasks completed! 🎉' :
-                     'No completed tasks yet'}
+                    {filter === 'all' ? 'No tasks yet. Add one above!' :
+                      filter === 'active' ? 'All tasks completed! 🎉' :
+                        'No completed tasks yet'}
                   </p>
                 </div>
               ) : (
                 filteredTodos.map(todo => (
-                  <div 
+                  <div
                     key={todo.id}
                     data-todo-id={todo.id}
                     className={`todo-item ${todo.completed ? 'completed' : ''} ${linkedTaskId === todo.id ? 'linked' : ''}`}
@@ -602,7 +702,7 @@ function App() {
                               {todo.text}
                             </p>
                             <div className="todo-meta">
-                              <span 
+                              <span
                                 className="priority-badge"
                                 style={{ background: getPriorityColor(todo.priority) }}
                               >
@@ -621,9 +721,9 @@ function App() {
                       {editingId !== todo.id && (
                         <div className="todo-actions">
                           {!todo.completed && !isBreakActive && (
-                            <button 
-                              onClick={() => startBreakForTask(todo.id)} 
-                              className="action-btn timer-btn" 
+                            <button
+                              onClick={() => startBreakForTask(todo.id)}
+                              className="action-btn timer-btn"
                               title="Start break for this task"
                             >
                               ⏱️
@@ -652,6 +752,41 @@ function App() {
           <span className="footer-brand">DevBreak</span> — Take breaks. Stay productive. Write great code. 🚀
         </p>
       </footer>
+
+      {/* Notification Popup */}
+      {showNotification && (
+        <div className="notification-overlay">
+          <div className="notification-popup" ref={notificationRef}>
+            <div className="notification-confetti">
+              <span>🎉</span>
+              <span>✨</span>
+              <span>🚀</span>
+              <span>💪</span>
+              <span>⭐</span>
+            </div>
+            <div className="notification-icon">🎊</div>
+            <h2 className="notification-title">Break Complete!</h2>
+            <p className="notification-message">
+              {completedTaskName
+                ? `Great job! You completed "${completedTaskName}"`
+                : 'Time to get back to coding refreshed!'}
+            </p>
+            <div className="notification-stats">
+              <div className="notification-stat">
+                <span className="stat-number">{breakDuration}</span>
+                <span className="stat-label">min break</span>
+              </div>
+              <div className="notification-stat">
+                <span className="stat-number">{completedCount}</span>
+                <span className="stat-label">tasks done</span>
+              </div>
+            </div>
+            <button onClick={closeNotification} className="notification-btn">
+              Continue Coding 🚀
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
